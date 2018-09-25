@@ -1,4 +1,4 @@
-pragma solidity ^0.4.22;
+pragma solidity ^0.4.24;
 
 import "./SafeMath.sol";
 
@@ -25,6 +25,7 @@ contract Owned {
 
     // allow transfer of ownership to another address in case shit hits the fan. 
     function transferOwnership(address newOwner) public onlyOwner {
+		require(newOwner != address(0));
         owner = newOwner;
     }
 }
@@ -32,11 +33,14 @@ contract Owned {
 contract StandardToken is ERC20 {
     using SafeMath for uint256;
 
-    mapping (address => uint256) balances;
-    mapping (address => mapping (address => uint256)) allowed;
+    mapping (address => uint256) internal balances;
+    mapping (address => mapping (address => uint256)) internal allowed;
 
     
     function transfer(address _to, uint256 _value) public returns (bool) {
+		require(_to != address(0));
+		require(_value <= balances[msg.sender]);
+		
         balances[msg.sender] = balances[msg.sender].sub(_value);
         balances[_to] = balances[_to].add(_value);
         emit Transfer(msg.sender, _to, _value);
@@ -58,8 +62,6 @@ contract StandardToken is ERC20 {
     function balanceOf(address _owner) public view returns (uint256 balance) {
         return balances[_owner];
     }
-    
-
 
     function approve(address _spender, uint256 _value) public returns (bool success) {
         // Added to prevent potential race attack.
@@ -74,6 +76,29 @@ contract StandardToken is ERC20 {
     function allowance(address _owner, address _spender) public view returns (uint256 remaining) {
       return allowed[_owner][_spender];
     }
+	
+	/**
+	* approve should be called when allowed[_spender] == 0. To increment
+	* allowed value is better to use this function to avoid 2 calls (and wait until
+	* the first transaction is mined)
+	* From MonolithDAO Token.sol
+	*/
+	function increaseApproval(address _spender, uint _addedValue) public returns (bool) {
+		allowed[msg.sender][_spender] = allowed[msg.sender][_spender].add(_addedValue);
+		emit Approval(msg.sender, _spender, allowed[msg.sender][_spender]);
+		return true;
+	}
+
+	function decreaseApproval(address _spender, uint _subtractedValue) public returns (bool) {
+		uint oldValue = allowed[msg.sender][_spender];
+		if (_subtractedValue > oldValue) {
+		  allowed[msg.sender][_spender] = 0;
+		} else {
+		  allowed[msg.sender][_spender] = oldValue.sub(_subtractedValue);
+		}
+		emit Approval(msg.sender, _spender, allowed[msg.sender][_spender]);
+		return true;
+	}
 }
 
 //token contract
@@ -111,6 +136,7 @@ contract QIQToken is Owned, StandardToken {
         require(isTransferable);
         return super.transferFrom(_from, _to, _value);
     } 
+	
 
     /**
      * Get totalSupply of tokens - Minus any from address 0 if that was used as a burnt method
@@ -143,6 +169,8 @@ contract QIQToken is Owned, StandardToken {
 
     /**
      * Allow distribution helper to help with distributeToken function
+	 * Here we should update the distributionAddress with the crowdsale contract address upon deployment
+	 * Allows for added flexibility in terms of scheduling, token allocation, etc.
      */
     function setDistributionAddress(address _setAddress) public onlyOwner {
         distributionAddress = _setAddress;
@@ -150,7 +178,7 @@ contract QIQToken is Owned, StandardToken {
 
     /**
      * Called by owner to transfer tokens - Managing manual distribution.
-     * Also allow distribution contract to call for this function
+     * Also allows distribution contract/crowdsale contract to call for this function
      */
     function distributeTokens(address _to, uint256 _value) public {
         require(distributionAddress == msg.sender || owner == msg.sender);
